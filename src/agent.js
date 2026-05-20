@@ -1,212 +1,198 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getScripture } from './tools/get_scripture.js';
+import dotenv from 'dotenv';
 import { searchViralNews } from './tools/search_viral_news.js';
+import { getScripture } from './tools/get_scripture.js';
 import { generatePost } from './tools/generate_post.js';
 import { generatePrayer } from './tools/generate_prayer.js';
 import { postToSocials } from './tools/post_to_socials.js';
-import dotenv from 'dotenv';
 
 dotenv.config();
 
 const client = new Anthropic();
 
+const SYSTEM_PROMPT =
+  "You are a ministry AI agent. Your mission is to find current viral news, " +
+  "interpret it through biblical wisdom, and create an uplifting faith-based " +
+  "post and prayer for the ministry's followers. Always be hopeful, compassionate, " +
+  "and non-partisan.";
+
 const tools = [
   {
-    name: 'get_scripture',
-    description: 'Retrieve Bible scripture passages by reference or topic. Use specific references like "John 3:16" or "Psalm 23" for best results.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        reference: {
-          type: 'string',
-          description: 'Bible reference like "John 3:16", "Psalm 91", or "Romans 8:28"',
-        },
-      },
-      required: ['reference'],
-    },
-  },
-  {
     name: 'search_viral_news',
-    description: 'Search for recent viral news articles on a given topic to understand current events and cultural context.',
+    description:
+      'Fetch the top viral news headline from the last 2 hours. Returns { title, description, url, publishedAt }.',
     input_schema: {
       type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Search query or topic to find relevant news',
-        },
-        max_results: {
-          type: 'number',
-          description: 'Maximum number of results to return (default: 5)',
-        },
-      },
-      required: ['query'],
+      properties: {},
+      required: [],
     },
   },
   {
-    name: 'generate_post',
-    description: 'Generate an engaging social media post that connects scripture with current events in a Spirit-led, ministry-focused way.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        scripture: {
-          type: 'string',
-          description: 'The scripture passage text to anchor the post',
-        },
-        news_context: {
-          type: 'string',
-          description: 'Summary of current events to connect with the scripture',
-        },
-        tone: {
-          type: 'string',
-          enum: ['encouraging', 'reflective', 'prophetic', 'intercessory'],
-          description: 'The spiritual tone of the post',
-        },
-        platform: {
-          type: 'string',
-          enum: ['twitter', 'instagram', 'facebook'],
-          description: 'Target social media platform',
-        },
-      },
-      required: ['scripture', 'news_context', 'tone', 'platform'],
-    },
-  },
-  {
-    name: 'generate_prayer',
-    description: 'Generate a heartfelt, scripture-anchored prayer based on current events and ministry topic.',
+    name: 'get_scripture',
+    description:
+      'Fetch a relevant Bible verse for a given topic or keyword. Returns { reference, text }.',
     input_schema: {
       type: 'object',
       properties: {
         topic: {
           type: 'string',
-          description: 'The main prayer topic or focus',
-        },
-        scripture_reference: {
-          type: 'string',
-          description: 'Scripture reference to anchor and inspire the prayer',
-        },
-        news_context: {
-          type: 'string',
-          description: 'Current events context to make the prayer timely and relevant',
+          description: 'A keyword or theme extracted from the headline to guide verse selection',
         },
       },
-      required: ['topic', 'scripture_reference', 'news_context'],
+      required: ['topic'],
+    },
+  },
+  {
+    name: 'generate_post',
+    description:
+      'Generate a short social post (under 280 chars) and a long ministry post (150-300 words) ' +
+      'connecting the headline to the scripture. Returns { short_post, long_post }.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        headline: {
+          type: 'string',
+          description: 'The news headline title',
+        },
+        scripture: {
+          type: 'object',
+          description: 'Scripture object with reference and text fields',
+          properties: {
+            reference: { type: 'string' },
+            text: { type: 'string' },
+          },
+          required: ['reference', 'text'],
+        },
+      },
+      required: ['headline', 'scripture'],
+    },
+  },
+  {
+    name: 'generate_prayer',
+    description:
+      'Write a 3-5 sentence intercessory prayer that is compassionate, personal, and faith-filled. ' +
+      'Returns { prayer }.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        headline: {
+          type: 'string',
+          description: 'The news headline providing context for the prayer',
+        },
+        post: {
+          type: 'string',
+          description: 'The long ministry post to draw tone and themes from',
+        },
+      },
+      required: ['headline', 'post'],
     },
   },
   {
     name: 'post_to_socials',
-    description: 'Post ministry content to social media platforms (currently simulated). Saves output to the output/ directory.',
+    description:
+      'Publish the content via Buffer API and archive everything to output/posts.json. ' +
+      'Returns { success, buffer_response, timestamp }.',
     input_schema: {
       type: 'object',
       properties: {
-        content: {
+        short_post: {
           type: 'string',
-          description: 'The content to post to social media',
+          description: 'Under-280-character post for Twitter/X',
         },
-        platforms: {
-          type: 'array',
-          items: {
-            type: 'string',
-            enum: ['twitter', 'instagram', 'facebook'],
+        long_post: {
+          type: 'string',
+          description: '150-300 word post for Facebook and Instagram',
+        },
+        headline: {
+          type: 'string',
+          description: 'Original news headline',
+        },
+        scripture: {
+          type: 'object',
+          description: 'Scripture object with reference and text',
+          properties: {
+            reference: { type: 'string' },
+            text: { type: 'string' },
           },
-          description: 'List of platforms to post to',
+          required: ['reference', 'text'],
         },
-        save_to_file: {
-          type: 'boolean',
-          description: 'Whether to save the post to the output directory (default: true)',
+        prayer: {
+          type: 'string',
+          description: 'Intercessory prayer text',
         },
       },
-      required: ['content', 'platforms'],
+      required: ['short_post', 'long_post', 'headline', 'scripture', 'prayer'],
     },
   },
 ];
 
-const toolExecutors = {
-  get_scripture: getScripture,
+const TOOL_EMOJIS = {
+  search_viral_news: '📰',
+  get_scripture: '🕊️ ',
+  generate_post: '✍️ ',
+  generate_prayer: '🙏',
+  post_to_socials: '📲',
+};
+
+const toolHandlers = {
   search_viral_news: searchViralNews,
+  get_scripture: getScripture,
   generate_post: generatePost,
   generate_prayer: generatePrayer,
   post_to_socials: postToSocials,
 };
 
-export async function runMinistryAgent(topic) {
-  console.log(`\n🙏 Ministry Prayer Agent starting for topic: "${topic}"\n`);
-  console.log('─'.repeat(60));
-
+export default async function runAgent() {
   const messages = [
-    {
-      role: 'user',
-      content: `You are a Spirit-led ministry assistant. Your mission is to create impactful, scripture-grounded ministry content for the following topic: "${topic}"
-
-Please complete these steps in order:
-1. Search for relevant current news and events related to this topic
-2. Find appropriate scripture passages that speak to this topic
-3. Generate an encouraging social media post for Instagram connecting the scripture to current events
-4. Generate a reflective post for Twitter (keep it under 280 chars)
-5. Write a heartfelt intercessory prayer about this topic
-6. Post all content to the respective platforms
-
-Be Spirit-led, authentic, and biblically grounded throughout. Let the scripture guide the message, not the other way around.`,
-    },
+    { role: 'user', content: 'Run the full ministry pipeline now.' },
   ];
 
-  let response;
-  let iterations = 0;
-  const maxIterations = 20;
+  console.log('\n🙏 Ministry Prayer Agent starting...\n' + '─'.repeat(50));
 
-  while (iterations < maxIterations) {
-    iterations++;
-    console.log(`\n[Iteration ${iterations}] Calling Claude claude-opus-4-7...`);
-
-    response = await client.messages.create({
-      model: 'claude-opus-4-7',
+  while (true) {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
-      thinking: { type: 'adaptive' },
-      system: `You are a Spirit-led ministry assistant who creates scripture-grounded, culturally relevant ministry content.
-You have deep knowledge of the Bible and understanding of how scripture applies to modern life.
-You approach every topic with prayer, discernment, and a heart for the people you serve.
-When connecting current events to scripture, you do so with wisdom, compassion, and hope — never sensationalism.
-Always complete the full workflow: research news, find scripture, generate posts for multiple platforms, write a prayer, and post/save everything.`,
+      system: SYSTEM_PROMPT,
       tools,
       messages,
     });
 
-    const stopReason = response.stop_reason;
-    console.log(`  Stop reason: ${stopReason}`);
+    // Append assistant turn to history
+    messages.push({ role: 'assistant', content: response.content });
 
-    if (stopReason === 'end_turn') {
-      console.log('\n✅ Agent completed its mission.\n');
-      break;
-    }
+    if (response.stop_reason === 'end_turn') break;
 
-    if (stopReason !== 'tool_use') {
-      console.log(`\n⚠️  Unexpected stop reason: ${stopReason}`);
+    if (response.stop_reason !== 'tool_use') {
+      console.log(`⚠️  Unexpected stop_reason: ${response.stop_reason}`);
       break;
     }
 
     const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-    messages.push({ role: 'assistant', content: response.content });
-
     const toolResults = [];
-    for (const toolUse of toolUseBlocks) {
-      console.log(`  🔧 Calling tool: ${toolUse.name}`);
+
+    for (const block of toolUseBlocks) {
+      const emoji = TOOL_EMOJIS[block.name] ?? '🔧';
+      console.log(`\n${emoji} Calling ${block.name}...`);
+
       try {
-        const executor = toolExecutors[toolUse.name];
-        if (!executor) throw new Error(`Unknown tool: ${toolUse.name}`);
-        const result = await executor(toolUse.input);
+        const handler = toolHandlers[block.name];
+        if (!handler) throw new Error(`No handler registered for tool: ${block.name}`);
+
+        const result = await handler(block.input);
         const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-        console.log(`     ✓ ${toolUse.name} completed (${resultStr.length} chars)`);
+
         toolResults.push({
           type: 'tool_result',
-          tool_use_id: toolUse.id,
+          tool_use_id: block.id,
           content: resultStr,
         });
       } catch (error) {
-        console.error(`     ✗ ${toolUse.name} failed: ${error.message}`);
+        console.error(`   ✗ ${block.name} failed: ${error.message}`);
         toolResults.push({
           type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Error executing ${toolUse.name}: ${error.message}`,
+          tool_use_id: block.id,
+          content: `Error: ${error.message}`,
           is_error: true,
         });
       }
@@ -214,15 +200,4 @@ Always complete the full workflow: research news, find scripture, generate posts
 
     messages.push({ role: 'user', content: toolResults });
   }
-
-  if (iterations >= maxIterations) {
-    console.log('\n⚠️  Max iterations reached.');
-  }
-
-  const finalText = response.content
-    .filter(b => b.type === 'text')
-    .map(b => b.text)
-    .join('\n');
-
-  return finalText;
 }
