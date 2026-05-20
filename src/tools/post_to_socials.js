@@ -1,64 +1,103 @@
+import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import path from 'path';
 
-export async function postToSocials({ content, platforms, save_to_file = true }) {
-  const timestamp = new Date().toISOString();
-  const results = [];
+const BUFFER_URL = 'https://api.bufferapp.com/1/updates/create.json';
 
-  for (const platform of platforms) {
-    const result = await simulatePost(platform, content);
-    results.push({ platform, ...result });
-    console.log(`  [${platform.toUpperCase()}] ${result.status}: ${result.post_id}`);
-  }
+async function postToBuffer(text, profileId, token) {
+  const body = new URLSearchParams();
+  body.append('text', text);
+  body.append('profile_ids[]', profileId);
 
-  if (save_to_file) {
-    const outputDir = path.join(process.cwd(), 'output');
-    const safeTimestamp = timestamp.replace(/[:.]/g, '-');
-    const filename = `post-${safeTimestamp}.txt`;
-    const filepath = path.join(outputDir, filename);
+  const response = await fetch(BUFFER_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+  });
 
-    const fileContent = [
-      `Ministry Post`,
-      `Timestamp: ${timestamp}`,
-      `Platforms: ${platforms.join(', ')}`,
-      ``,
-      `--- CONTENT ---`,
-      content,
-      ``,
-      `--- RESULTS ---`,
-      ...results.map(r => `${r.platform}: ${r.status} (${r.post_id})`),
-    ].join('\n');
-
-    await fs.writeFile(filepath, fileContent, 'utf8');
-  }
-
-  return JSON.stringify({
-    timestamp,
-    content_preview: content.substring(0, 150) + (content.length > 150 ? '...' : ''),
-    results,
-    saved_to_file: save_to_file,
-  }, null, 2);
+  const data = await response.json();
+  return { profileId, status: response.status, ok: response.ok, data };
 }
 
-async function simulatePost(platform, content) {
-  await new Promise(resolve => setTimeout(resolve, 300));
-  const limits = { twitter: 280, instagram: 2200, facebook: 63206 };
-  const limit = limits[platform] || 5000;
-  const postId = `mock_${platform}_${Date.now()}`;
+async function archive(payload) {
+  const outputDir = path.join(process.cwd(), 'output');
+  const filepath = path.join(outputDir, 'posts.json');
 
-  if (content.length > limit) {
-    return {
-      status: 'truncated',
-      message: `Content exceeded ${platform} limit of ${limit} characters. Posted truncated version.`,
-      post_id: postId,
-      character_count: content.length,
-    };
+  let existing = [];
+  try {
+    const raw = await fs.readFile(filepath, 'utf8');
+    existing = JSON.parse(raw);
+    if (!Array.isArray(existing)) existing = [existing];
+  } catch {
+    // File doesn't exist yet — start fresh
   }
 
-  return {
-    status: 'posted',
-    message: `Successfully posted to ${platform} (simulated)`,
-    post_id: postId,
-    character_count: content.length,
+  existing.push(payload);
+  await fs.writeFile(filepath, JSON.stringify(existing, null, 2), 'utf8');
+}
+
+export async function postToSocials({ short_post, long_post, headline, scripture, prayer }) {
+  console.log('📲 Posting to social platforms...');
+
+  const timestamp = new Date().toISOString();
+  const token = process.env.BUFFER_ACCESS_TOKEN;
+  const profileIdsRaw = process.env.BUFFER_PROFILE_IDS || '';
+  const profileIds = profileIdsRaw.split(',').map(id => id.trim()).filter(Boolean);
+
+  const archivePayload = {
+    timestamp,
+    headline,
+    scripture,
+    short_post,
+    long_post,
+    prayer,
+    buffer_response: {},
   };
+
+  if (!token || !profileIds.length) {
+    console.log('📲 BUFFER_ACCESS_TOKEN or BUFFER_PROFILE_IDS not set — skipping Buffer, archiving only');
+    await archive(archivePayload);
+    return { success: true, buffer_response: {}, timestamp };
+  }
+
+  const bufferResults = [];
+
+  try {
+    // First profile ID → Twitter (short_post)
+    const twitterId = profileIds[0];
+    console.log(`📲 Posting short_post to Twitter profile ${twitterId}...`);
+    const twitterResult = await postToBuffer(short_post, twitterId, token);
+    bufferResults.push(twitterResult);
+
+    if (!twitterResult.ok) {
+      console.log(`📲 ⚠️  Twitter post failed (${twitterResult.status})`);
+    }
+
+    // Remaining profile IDs → Facebook, Instagram (long_post)
+    for (const profileId of profileIds.slice(1)) {
+      console.log(`📲 Posting long_post to profile ${profileId}...`);
+      const result = await postToBuffer(long_post, profileId, token);
+      bufferResults.push(result);
+
+      if (!result.ok) {
+        console.log(`📲 ⚠️  Post to ${profileId} failed (${result.status})`);
+      }
+    }
+
+    archivePayload.buffer_response = bufferResults;
+    await archive(archivePayload);
+
+    const allOk = bufferResults.every(r => r.ok);
+    console.log(`📲 Buffer posting ${allOk ? 'succeeded' : 'partially failed'} — archived to output/posts.json`);
+    return { success: allOk, buffer_response: bufferResults, timestamp };
+
+  } catch (error) {
+    console.log(`📲 ⚠️  Buffer error (${error.message}) — archiving to output/posts.json`);
+    archivePayload.buffer_response = { error: error.message };
+    await archive(archivePayload);
+    return { success: false, buffer_response: { error: error.message }, timestamp };
+  }
 }

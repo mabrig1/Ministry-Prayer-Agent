@@ -2,31 +2,47 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic();
 
-export async function generatePrayer({ topic, scripture_reference, news_context }) {
+export async function generatePrayer({ headline, post }) {
+  console.log('🙏 Generating intercessory prayer...');
+
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 1024,
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 512,
     messages: [
       {
         role: 'user',
-        content: `Write a heartfelt, scripture-based prayer about: ${topic}
+        content: `You are a ministry prayer writer. Write a short intercessory prayer based on the following context.
 
-Scripture anchor: ${scripture_reference}
+News headline: ${headline}
 
-Current events context: ${news_context}
+Ministry post: ${post}
 
-The prayer should:
-- Open with praise and acknowledgment of God
-- Incorporate the scripture naturally
-- Address the current events with faith and hope
-- Include specific intercessions for those affected
-- Close with declaration of trust in God's sovereignty
-- Feel genuine, warm, and Spirit-led (not formulaic)
+Write exactly this JSON structure with no extra text:
+{
+  "prayer": "<3-5 sentences, intercessory, compassionate, personal, faith-filled. Opens addressing God. Intercedes for those affected by the news. Closes with trust in God's sovereignty.>"
+}
 
-Format it as a prayer that could be read aloud in a ministry setting.`,
+Rules:
+- 3-5 sentences only
+- Compassionate and personal, not generic
+- Never political
+- Grounded in faith and hope`,
       },
     ],
   });
 
-  return response.content[0].text;
+  const raw = response.content[0].text.trim();
+
+  try {
+    const parsed = JSON.parse(raw);
+    console.log('🙏 Prayer generated');
+    return { prayer: parsed.prayer };
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return { prayer: parsed.prayer };
+    }
+    throw new Error('generate_prayer: could not parse JSON from model response');
+  }
 }

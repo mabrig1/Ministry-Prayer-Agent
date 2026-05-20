@@ -1,14 +1,27 @@
 import fetch from 'node-fetch';
 
-export async function getScripture({ reference }) {
+const FALLBACK = {
+  reference: 'John 3:16',
+  text: 'For God so loved the world, that he gave his only Son, that whoever believes in him should not perish but have eternal life.',
+};
+
+export async function getScripture({ topic }) {
   try {
-    const encoded = encodeURIComponent(reference);
-    const response = await fetch(`https://bible-api.com/${encoded}`);
-    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+    const response = await fetch('https://bible-api.com/?random=verse');
+
+    if (!response.ok) throw new Error(`bible-api error: ${response.status}`);
+
     const data = await response.json();
-    if (data.error) return `Could not find scripture for "${reference}". Try a specific reference like "John 3:16".`;
-    return `${data.reference}\n\n"${data.text.trim()}"\n\n(Translation: ${data.translation_id || 'WEB'})`;
+
+    if (!data.reference || !data.text) throw new Error('Invalid response from bible-api');
+
+    console.log(`🕊️  Scripture: ${data.reference}`);
+    return {
+      reference: data.reference,
+      text: data.text.trim(),
+    };
   } catch (error) {
-    return `Error fetching scripture for "${reference}": ${error.message}`;
+    console.log(`🕊️  Bible API failed (${error.message}) — using fallback verse`);
+    return FALLBACK;
   }
 }
