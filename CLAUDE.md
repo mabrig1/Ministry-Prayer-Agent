@@ -1,68 +1,61 @@
-# Ministry Prayer Agent — Claude Code Guide
+# Ministry Prayer Agent
 
-## Project Overview
+## Project Goal
+AI agent that monitors viral news, interprets it through a biblical lens,
+generates a ministry post + prayer, and publishes to all platforms via Buffer.
 
-An AI-powered ministry assistant that creates scripture-grounded social media content and prayers by connecting current events to biblical truth. Uses Claude claude-opus-4-7 as the orchestrating agent and Claude claude-haiku-4-5 for fast content generation.
-
-## Architecture
-
-```
-src/
-  index.js        — Entry point, parses CLI topic argument
-  agent.js        — Main agentic loop using claude-opus-4-7 with tool use
-  tools/
-    get_scripture.js      — Fetches Bible passages via bible-api.com
-    search_viral_news.js  — Searches news via newsapi.org (mock fallback included)
-    generate_post.js      — Generates platform-specific posts via claude-haiku-4-5
-    generate_prayer.js    — Generates intercessory prayers via claude-haiku-4-5
-    post_to_socials.js    — Simulates posting, saves to output/
-output/
-  .gitkeep        — Tracks output dir; generated posts saved here as .txt files
-```
-
-## Running the Agent
-
-```bash
-# Copy and fill in your API keys
-cp .env.example .env
-
-# Run with default topic
-npm start
-
-# Run with custom topic
-node src/index.js "peace amid conflict"
-node src/index.js "healing and restoration"
-node src/index.js "faith over fear"
-```
+## Stack
+- Runtime: Node.js (ESM), type: module in package.json
+- SDK: @anthropic-ai/sdk (tool_use agentic loop)
+- Model: claude-sonnet-4-20250514
+- News: NewsAPI.org — top headlines, last 2 hours
+- Bible: bible-api.com (free, no key)
+- Social: Buffer API (all platforms in one call)
 
 ## Environment Variables
+ANTHROPIC_API_KEY=
+NEWS_API_KEY=
+BUFFER_ACCESS_TOKEN=
 
-| Variable | Required | Description |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
-| `NEWS_API_KEY` | No | newsapi.org key (mock data used if absent) |
-| `TWITTER_*` | No | Twitter credentials (currently simulated) |
-| `INSTAGRAM_ACCESS_TOKEN` | No | Instagram token (currently simulated) |
-| `FACEBOOK_PAGE_TOKEN` | No | Facebook token (currently simulated) |
+## Tool Pipeline Order
+1. search_viral_news  → returns top headline
+2. get_scripture      → returns relevant verse for the topic
+3. generate_post      → returns short_post + long_post
+4. generate_prayer    → returns intercessory prayer
+5. post_to_socials    → publishes via Buffer, archives to output/posts.json
 
-## Models Used
+## Agent System Prompt
+"You are a ministry AI agent. Your mission is to find current viral news,
+interpret it through biblical wisdom, and create an uplifting faith-based
+post and prayer for the ministry's followers. Always be hopeful, compassionate,
+and non-partisan."
 
-- **claude-opus-4-7** with `thinking: {type: "adaptive"}` — main orchestrator, plans the workflow and calls tools
-- **claude-haiku-4-5** — fast, cost-effective generation for posts and prayers
+## Post Rules
+- short_post: under 280 chars + 2 relevant hashtags (for Twitter/X)
+- long_post: 150-300 words, warm ministry tone (for Facebook/Instagram)
+- Prayer: 3-5 sentences, intercessory, compassionate
+- Never political, always redemptive in framing
 
-## Tool Descriptions
+## Buffer Integration
+- Endpoint: https://api.bufferapp.com/1/updates/create.json
+- Pass BUFFER_ACCESS_TOKEN in Authorization header
+- Post short_post to Twitter profile
+- Post long_post to Facebook and Instagram profiles
+- BUFFER_PROFILE_IDS stored as comma-separated env var
 
-| Tool | Description |
-|---|---|
-| `get_scripture` | Fetches Bible text from bible-api.com (free, no auth) |
-| `search_viral_news` | Searches newsapi.org; returns mock articles if no key |
-| `generate_post` | Creates platform-specific posts (twitter/instagram/facebook) |
-| `generate_prayer` | Writes heartfelt, scripture-anchored intercessory prayers |
-| `post_to_socials` | Simulates posting; saves to `output/post-{timestamp}.txt` |
+## Error Handling
+- News fails → use topic "hope and resilience in today's world"
+- Bible API fails → fallback to { reference: "John 3:16", text: "For God so loved the world..." }
+- Buffer fails → save to output/posts.json and log warning
+- Log every step with emoji: 📰 🕊️ ✍️ 🙏 📲
 
-## Development Notes
-
-- Uses ES Modules (`"type": "module"` in package.json) — all imports must use `.js` extensions
-- `node-fetch` provides `fetch()` for Node.js HTTP calls
-- The agentic loop caps at 20 iterations to prevent runaway execution
-- Output files are gitignored (only `.gitkeep` is tracked)
+## Archive Format (output/posts.json)
+{
+  "timestamp": "ISO string",
+  "headline": "string",
+  "scripture": { "reference": "string", "text": "string" },
+  "short_post": "string",
+  "long_post": "string",
+  "prayer": "string",
+  "buffer_response": {}
+}
